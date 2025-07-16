@@ -16,3 +16,11 @@ class RequireInfoLostException(Exception):
 
 class ChangePwdError(Exception):
     pass
+
+
+class EmailFormatError(Exception):
+    pass
+
+
+class DuplicatedAccountBookError(Exception):
+    pass
