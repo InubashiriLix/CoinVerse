@@ -12,7 +12,7 @@ import hashlib
 
 import logging
 
-from cus_exceptions import TokenExpireException, PwdNotMatchError
+from cus_exceptions import TokenExpireException, PwdNotMatchError, TokenNotFoundError
 
 DB_PATH = Path(__file__).parent / ".." / "db" / "account.db"
 DB_PATH.parent.mkdir(exist_ok=True)
@@ -331,6 +331,41 @@ class Account:
         books = Account._load_books(conn, acc_id)
         return Account(acc_id, name, email, db_hash, new_token, books)
 
+    @staticmethod
+    def logout(conn: sqlite3.Connection, token: str) -> bool:
+        row = conn.execute(
+            "SELECT account_id, token_expire FROM accounts WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if not row:
+            raise TokenNotFoundError("Token not found")
+        account_id, token_expire = row
+        now = int(time.time())
+        if token_expire is not None and now > token_expire:
+            return True
+        # 使 token 立即过期
+        conn.execute(
+            "UPDATE accounts SET token_expire = ? WHERE account_id = ?",
+            (now - 1, account_id),
+        )
+        conn.commit()
+        return True
+
+    @staticmethod
+    def get_profile(conn: sqlite3.Connection, token: str) -> "Account":
+        row = conn.execute(
+            "SELECT account_id, name, email, pwd, token, token_expire FROM accounts WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if not row:
+            raise TokenNotFoundError("Token not found")
+        acc_id, name, email, pwd_hash, token, token_expire = row
+        now = int(time.time())
+        if token_expire is not None and now > token_expire:
+            raise TokenExpireException("Token expired")
+        books = Account._load_books(conn, acc_id)
+        return Account(acc_id, name, email, pwd_hash, token, books)
+
     # ------------------------- 其它接口（基本保持不变） -------- #
     @staticmethod
     def create_book(
@@ -352,13 +387,18 @@ class Account:
 
     @staticmethod
     def change_pwd(
-        conn: sqlite3.Connection, account_id: int, old_pwd_hash: str, new_pwd_hash: str
+        conn: sqlite3.Connection,
+        email_or_name: str,
+        old_pwd_hash: str,
+        new_pwd_hash: str,
     ) -> bool:
         row = conn.execute(
-            "SELECT pwd FROM accounts WHERE account_id = ?", (account_id,)
+            "SELECT account_id, pwd FROM accounts WHERE name = ? OR email = ?",
+            (email_or_name, email_or_name),
         ).fetchone()
-        if not row or row[0] != old_pwd_hash:
+        if not row or row[1] != old_pwd_hash:
             return False
+        account_id = row[0]
         conn.execute(
             "UPDATE accounts SET pwd = ? WHERE account_id = ?",
             (new_pwd_hash, account_id),
@@ -625,8 +665,8 @@ if __name__ == "__main__":
 
     # 7️⃣ 修改密码并验证
     ok = Account.change_pwd(
-        conn,
-        account_id=login_acc.id,  # pyright: ignore[reportOptionalMemberAccess]
+        conn=conn,
+        email_or_name="alice",  # pyright: ignore[reportArgumentType]
         old_pwd_hash="123456",
         new_pwd_hash="better_pwd",
     )
