@@ -3,11 +3,16 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from datetime import datetime
+import time
 from enum import Enum, auto
 from typing import Optional, Union, List, Tuple
 
+import secrets
+import hashlib
+
 import logging
-from utils import _hash_pwd
+
+from cus_exceptions import TokenExpireException, PwdNotMatchError
 
 DB_PATH = Path(__file__).parent / ".." / "db" / "account.db"
 DB_PATH.parent.mkdir(exist_ok=True)
@@ -200,48 +205,133 @@ class Transaction:
         return result
 
 
+def _hash_pwd(pwd: str) -> str:
+    return hashlib.sha256(pwd.encode()).hexdigest()
+
+
+def _gen_token() -> str:
+    # 32 字节 -> 64 位十六进制字符串
+    return secrets.token_hex(32)
+
+
 class Account:
     id: int
     name: str
+    email: str  # 新增
     pwd_hash: str
-    books: Optional[List[AccountBook]]
+    token: str  # 新增
+    books: List[AccountBook]
 
+    # ------------------------- 构造器 ------------------------- #
     def __init__(
         self,
         id: int,
         name: str,
+        email: str,
         pwd_hash: str,
+        token: str,
         books: Optional[List[AccountBook]] = None,
     ):
         self.id = id
         self.name = name
+        self.email = email
         self.pwd_hash = pwd_hash
-        self.books = books if books is not None else []
+        self.token = token
+        self.books = books or []
 
+    # ------------------------- 账号注册 ------------------------ #
     @staticmethod
-    def register(conn: sqlite3.Connection, name: str, pwd: str) -> Account:
+    def register(
+        conn: sqlite3.Connection, name: str, email: str, pwd_hash: str
+    ) -> bool:
+        token = _gen_token()
         cur = conn.execute(
-            "INSERT INTO accounts (name, pwd) VALUES (?, ?)", (name, _hash_pwd(pwd))
+            "INSERT INTO accounts (name, email, pwd, token) VALUES (?, ?, ?, ?)",
+            (name, email, pwd_hash, token),
         )
         conn.commit()
-        # Return the new Account object (initialize books list empty)
-        account_id = cur.lastrowid
-        assert account_id is not None, "Failed to create account, no ID returned."
-        return Account(id=account_id, name=name, pwd_hash=_hash_pwd(pwd), books=[])
+        acc_id = cur.lastrowid
+        if acc_id is None:
+            raise RuntimeError("Failed to create account, no ID returned.")
+        logging.info(f"Account created with ID: {acc_id}, Name: {name}, Email: {email}")
+        return Account(acc_id, name, email, pwd_hash, token, books=[]) is not None
 
+    # ------------------------- 密码登录 ------------------------ #
     @staticmethod
-    def login(conn: sqlite3.Connection, name: str, pwd: str) -> Optional[Account]:
+    def login(
+        conn: sqlite3.Connection, name_or_email: str, pwd_hash: str
+    ) -> Optional["Account"]:
+        import secrets
+
         row = conn.execute(
-            "SELECT account_id, pwd FROM accounts WHERE name = ?", (name,)
+            """
+            SELECT account_id, name, email, pwd, token
+            FROM accounts
+            WHERE name = ? OR email = ?
+            """,
+            (name_or_email, name_or_email),
         ).fetchone()
         if not row:
             return None
-        acc_id, db_hash = row
-        if db_hash != _hash_pwd(pwd):
-            return None
+        acc_id, name, email, db_hash, _ = row
+        if pwd_hash != db_hash:
+            raise PwdNotMatchError(
+                "Invalid password hash code, consider using wrong password or hash compute error"
+            )
+        # Generate new token and expire time
+        new_token = secrets.token_urlsafe(32)
+        expire = int(time.time()) + 3600 * 24 * 15  #  15 day expiry
+        conn.execute(
+            "UPDATE accounts SET token = ?, token_expire = ? WHERE account_id = ?",
+            (new_token, expire, acc_id),
+        )
+        conn.commit()
         books = Account._load_books(conn, acc_id)
-        return Account(id=acc_id, name=name, pwd_hash=db_hash, books=books)
+        return Account(acc_id, name, email, db_hash, new_token, books)
 
+    # ------------------------- Token 登录 --------------------- #
+    @staticmethod
+    def login_by_token(conn: sqlite3.Connection, token: str) -> Optional["Account"]:
+        row = conn.execute(
+            "SELECT account_id, name, email, pwd, token FROM accounts WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if not row:
+            return None
+        acc_id, name, email, pwd_hash, token = row
+        books = Account._load_books(conn, acc_id)
+        return Account(acc_id, name, email, pwd_hash, token, books)
+
+    @staticmethod
+    def refresh_token(conn: sqlite3.Connection, old_token: str) -> Optional["Account"]:
+        import secrets
+
+        row = conn.execute(
+            """
+            SELECT account_id, name, email, pwd, token, token_expire
+            FROM accounts
+            WHERE token = ?
+            """,
+            (old_token,),
+        ).fetchone()
+        if not row:
+            return None
+        acc_id, name, email, db_hash, token, token_expire = row
+        now = int(time.time())
+        if token_expire is not None and now > token_expire:
+            raise TokenExpireException("Token expired")
+        # 生成新 token 和过期时间
+        new_token = secrets.token_urlsafe(32)
+        expire = now + 3600 * 24 * 15  # 15 day expire
+        conn.execute(
+            "UPDATE accounts SET token = ?, token_expire = ? WHERE account_id = ?",
+            (new_token, expire, acc_id),
+        )
+        conn.commit()
+        books = Account._load_books(conn, acc_id)
+        return Account(acc_id, name, email, db_hash, new_token, books)
+
+    # ------------------------- 其它接口（基本保持不变） -------- #
     @staticmethod
     def create_book(
         conn: sqlite3.Connection, account_id: int, book_name: str
@@ -251,12 +341,10 @@ class Account:
             (book_name, account_id),
         )
         conn.commit()
-        # Instantiate a new AccountBook object for the created book
-        account_book_id = cur.lastrowid
-        assert account_book_id is not None, (
-            "Failed to create account book, no ID returned."
-        )
-        return AccountBook(id=account_id, name=book_name, account_id=account_id)
+        book_id = cur.lastrowid
+        if book_id is None:
+            raise RuntimeError("Failed to create account book, no ID returned.")
+        return AccountBook(id=book_id, name=book_name, account_id=account_id)
 
     @staticmethod
     def list_books(conn: sqlite3.Connection, account_id: int) -> List[AccountBook]:
@@ -264,16 +352,16 @@ class Account:
 
     @staticmethod
     def change_pwd(
-        conn: sqlite3.Connection, account_id: int, old_pwd: str, new_pwd: str
+        conn: sqlite3.Connection, account_id: int, old_pwd_hash: str, new_pwd_hash: str
     ) -> bool:
         row = conn.execute(
             "SELECT pwd FROM accounts WHERE account_id = ?", (account_id,)
         ).fetchone()
-        if not row or row[0] != _hash_pwd(old_pwd):
+        if not row or row[0] != old_pwd_hash:
             return False
         conn.execute(
             "UPDATE accounts SET pwd = ? WHERE account_id = ?",
-            (_hash_pwd(new_pwd), account_id),
+            (new_pwd_hash, account_id),
         )
         conn.commit()
         return True
@@ -442,12 +530,14 @@ def init() -> Tuple[sqlite3.Connection, sqlite3.Cursor]:
 
     # accounts table
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS accounts (
-        account_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name       TEXT NOT NULL,
-        pwd        TEXT NOT NULL
-    )
-    """)
+        CREATE TABLE IF NOT EXISTS accounts (
+        account_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+        name          TEXT    NOT NULL UNIQUE,
+        email         TEXT    NOT NULL UNIQUE,
+        pwd           TEXT    NOT NULL,        
+        token         TEXT    NOT NULL,
+        token_expire  INTEGER 
+    );""")
 
     # linking table for accounts and account_books (for future multi-user support)
     cursor.execute("""
@@ -488,10 +578,12 @@ if __name__ == "__main__":
     conn, _ = init()
 
     # 2️⃣ 注册 & 登录
-    alice = Account.register(conn, "alice", "123456")
+    alice = Account.register(
+        conn, name="alice", email="123321@gmail.com", pwd_hash="123456"
+    )
     print("👤 注册成功:", alice)
 
-    login_acc = Account.login(conn, "alice", "123456")
+    login_acc = Account.login(conn, "alice", "123456")  # pyright: ignore[reportCallIssue]
     print("🔐 登录成功:", login_acc)
 
     # 3️⃣ 创建账本
@@ -535,8 +627,8 @@ if __name__ == "__main__":
     ok = Account.change_pwd(
         conn,
         account_id=login_acc.id,  # pyright: ignore[reportOptionalMemberAccess]
-        old_pwd="123456",
-        new_pwd="better_pwd",
+        old_pwd_hash="123456",
+        new_pwd_hash="better_pwd",
     )
     print("🔑 修改密码成功?:", ok)
     relog = Account.login(conn, "alice", "better_pwd")
