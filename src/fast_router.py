@@ -1,5 +1,3 @@
-from os import access
-from secrets import token_bytes
 from typing import Optional
 
 # fast api
@@ -8,13 +6,19 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
 # fastapi response model
-from fastapi_req_resp_type import RegisterRequest, RegisterResponse
+from fastapi_req_resp_type import (
+    ChangePasswordResponse,
+    RegisterRequest,
+    RegisterResponse,
+)
 from fastapi_req_resp_type import LoginRequest, LoginResponse, RefreshTokenResponse
 from fastapi_req_resp_type import (
     RefreshTokenRequest,
-    UserProfile,
+    GetUserProfileRequest,
+    GetUserProfileResponse,
     ChangePasswordRequest,
 )
+from fastapi_req_resp_type import LogoutRequest, LogoutResponse
 
 # the databse shits
 from sqlite3 import Connection, IntegrityError
@@ -22,7 +26,12 @@ from db_api import init
 from db_api import Account, AccountBook, Transaction
 
 # the custom exceptions
-from cus_exceptions import TokenExpireException, PwdNotMatchError
+from cus_exceptions import (
+    RequireInfoLostException,
+    TokenExpireException,
+    PwdNotMatchError,
+    TokenNotFoundError,
+)
 
 import logging
 
@@ -31,9 +40,10 @@ logging.basicConfig(
     format="[%(asctime)s - %(name)s - %(levelname)s] - %(message)s",
 )
 
+conn: Connection
 conn, _ = init()
 
-router: APIRouter = APIRouter(prefix="/auth", tags=["auth"])
+router: APIRouter = APIRouter(prefix="/CoinVerse", tags=["interfaces"])
 
 
 @router.post(
@@ -63,15 +73,10 @@ async def register_user(data: RegisterRequest):
     summary="name / email + pwd to login, return the token",
 )
 async def login(data: LoginRequest):
-    if data.name is None and data.email is None:
-        return LoginResponse(
-            success=False, msg="name or email is required", access_token=None
-        )
-    # NOTE: the msg content is desired to be shown in the app, cause' it has the helpful hints
     try:
         temp_acc = Account.login(
             conn=conn,
-            name_or_email=data.name if data.name is not None else data.email,  # pyright: ignore[reportArgumentType] # it has been checked before this line
+            name_or_email=data.name_or_email,
             pwd_hash=data.pwd_hash,
         )
         if temp_acc is None:
@@ -124,32 +129,77 @@ async def refresh_token(data: RefreshTokenRequest):
 
 @router.post(
     "/logout",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="logout, invalidate the token",
+    response_model=LogoutResponse,
+    summary="logout, invalidate the token (expire it)",
 )
-async def logout():
-    # TODO: invalidate the token
-    pass
+async def logout(data: LogoutRequest):
+    try:
+        status = Account.logout(conn=conn, token=data.old_token)
+        return LogoutResponse(
+            success=status, msg="Logout successful" if status else "Logout failed"
+        )
+    except TokenNotFoundError:
+        logging.warning("Token not found, cannot logout")
+        # NOTE: the True cause' protection programming?
+        return LogoutResponse(success=True, msg="Token not found, cannot logout")
+    except Exception as e:
+        logging.error(f"Error logging out user: {e}")
+        return LogoutResponse(success=False, msg=str(e))
 
 
-@router.get("/users/me", response_model=UserProfile, summary="get the user info")
-async def get_profile():
-    # Depends(get_current_user):
-    # TODO: get the current user and return ther profile
-    pass
+@router.get(
+    "/users/me", response_model=GetUserProfileResponse, summary="get the user info"
+)
+async def get_profile(data: GetUserProfileRequest):
+    try:
+        Account.get_profile(conn=conn, token=data.token)
+        return GetUserProfileResponse(
+            success=True,
+            msg="Profile retrieved successfully",
+            name=Account.name,
+            email=Account.email,
+        )
+    except TokenNotFoundError:
+        logging.warning("Token not found, cannot get profile")
+        return GetUserProfileResponse(
+            success=False, msg="Token not found, cannot get profile", name="", email=""
+        )
+    except Exception as e:
+        logging.error(f"Error getting user profile: {e}")
+        return GetUserProfileResponse(success=False, msg=str(e), name="", email="")
 
 
 @router.put(
     "/users/me/password",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=ChangePasswordResponse,
     summary="change the user password",
 )
-async def change_password():
-    # TODO: change the user password here
-    pass
+async def change_password(data: ChangePasswordRequest):
+    try:
+        if data.old_pwd_hash == data.new_pwd_hash:
+            logging.warning("Old password and new password are the same")
+            return ChangePasswordResponse(
+                success=False, msg="Old password and new password cannot be the same"
+            )
+        Account.change_pwd(
+            conn=conn,
+            email_or_name=data.name_or_email,  # pyright: ignore[reportArgumentType] # it has been checked before this line
+            old_pwd_hash=data.old_pwd_hash,
+            new_pwd_hash=data.new_pwd_hash,
+        )
+        return ChangePasswordResponse(success=True, msg="Password changed successfully")
+    except RequireInfoLostException as e:
+        logging.warning(f"Require info lost: {e}")
+        return ChangePasswordResponse(success=False, msg=str(e))
+    except PwdNotMatchError:
+        logging.warning("Old password does not match")
+        return ChangePasswordResponse(success=False, msg="Old password does not match")
+    except Exception as e:
+        logging.error(f"Error changing password: {e}")
+        return ChangePasswordResponse(success=False, msg=str(e))
 
 
-app = FastAPI(title="shit", version="0.1.0")
+app = FastAPI(title="CoinVerse", version="0.1.0")
 app.include_router(router)
 
 if __name__ == "__main__":
