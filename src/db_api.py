@@ -12,7 +12,14 @@ import hashlib
 
 import logging
 
-from cus_exceptions import TokenExpireException, PwdNotMatchError, TokenNotFoundError
+from utils import verify_email_format
+from cus_exceptions import (
+    DuplicatedAccountBookError,
+    EmailFormatError,
+    TokenExpireException,
+    PwdNotMatchError,
+    TokenNotFoundError,
+)
 
 DB_PATH = Path(__file__).parent / ".." / "db" / "account.db"
 DB_PATH.parent.mkdir(exist_ok=True)
@@ -29,6 +36,18 @@ class IncomeType(Enum):
     INVEST = auto()
     OTHER = auto()
 
+    @staticmethod
+    def index_2_income_type(idx: int) -> IncomeType:
+        return IncomeType(idx) if 0 <= idx < len(IncomeType) else IncomeType.OTHER
+
+    @staticmethod
+    def index_2_income_type_name(idx: int) -> str:
+        return (
+            IncomeType.index_2_income_type(idx).name
+            if 0 <= idx < len(IncomeType)
+            else "OTHER"
+        )
+
 
 class OutcomeType(Enum):
     FOOD = auto()
@@ -36,6 +55,18 @@ class OutcomeType(Enum):
     TRANSPORT = auto()
     ENTERTAIN = auto()
     OTHER = auto()
+
+    @staticmethod
+    def index_2_outcome_type(idx: int) -> OutcomeType:
+        return OutcomeType(idx) if 0 <= idx < len(OutcomeType) else OutcomeType.OTHER
+
+    @staticmethod
+    def index_2_outcome_type_name(idx: int) -> str:
+        return (
+            OutcomeType.index_2_outcome_type(idx).name
+            if 0 <= idx < len(OutcomeType)
+            else "OTHER"
+        )
 
 
 class DebtType(Enum):
@@ -244,6 +275,9 @@ class Account:
     def register(
         conn: sqlite3.Connection, name: str, email: str, pwd_hash: str
     ) -> bool:
+        if not verify_email_format(email):
+            raise EmailFormatError("Invalid email format")
+
         token = _gen_token()
         cur = conn.execute(
             "INSERT INTO accounts (name, email, pwd, token) VALUES (?, ?, ?, ?)",
@@ -369,8 +403,27 @@ class Account:
     # ------------------------- 其它接口（基本保持不变） -------- #
     @staticmethod
     def create_book(
-        conn: sqlite3.Connection, account_id: int, book_name: str
+        conn: sqlite3.Connection, token: str, book_name: str
     ) -> AccountBook:
+        cur = conn.execute(
+            "SELECT account_id, token_expire FROM accounts WHERE token = ?",
+            (token,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise TokenNotFoundError("Token not found.")
+        account_id, token_expire = row
+        now = int(time.time())
+        if token_expire is not None and now > token_expire:
+            raise TokenExpireException("Token expired.")
+        dup_cur = conn.execute(
+            "SELECT 1 FROM account_books WHERE name = ? AND account_id = ?",
+            (book_name, account_id),
+        )
+        if dup_cur.fetchone() is not None:
+            raise DuplicatedAccountBookError(
+                "Account book name already exists for this account."
+            )
         cur = conn.execute(
             "INSERT INTO account_books (name, account_id) VALUES (?, ?)",
             (book_name, account_id),
@@ -382,8 +435,48 @@ class Account:
         return AccountBook(id=book_id, name=book_name, account_id=account_id)
 
     @staticmethod
-    def list_books(conn: sqlite3.Connection, account_id: int) -> List[AccountBook]:
+    def list_books(conn: sqlite3.Connection, token: str) -> List[AccountBook]:
+        row = conn.execute(
+            "SELECT account_id, token_expire FROM accounts WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if row is None:
+            raise TokenNotFoundError("Token not found.")
+        account_id, token_expire = row
+        now = int(time.time())
+        if token_expire is not None and now > token_expire:
+            raise TokenExpireException("Token expired.")
         return Account._load_books(conn, account_id)
+
+    @staticmethod
+    def remove_account_book(conn: sqlite3.Connection, token: str, book_id: int) -> bool:
+        # Check token validity and expiry
+        row = conn.execute(
+            "SELECT account_id, token_expire FROM accounts WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if row is None:
+            raise TokenNotFoundError("Token not found.")
+        account_id, token_expire = row
+        now = int(time.time())
+        if token_expire is not None and now > token_expire:
+            raise TokenExpireException("Token expired.")
+        # Check if the account_book belongs to the account
+        book_row = conn.execute(
+            "SELECT 1 FROM account_books WHERE account_book_id = ? AND account_id = ?",
+            (book_id, account_id),
+        ).fetchone()
+        if book_row is None:
+            raise RuntimeError(
+                "Account book not found or does not belong to this account."
+            )
+        # Remove the account_book
+        conn.execute(
+            "DELETE FROM account_books WHERE account_book_id = ?",
+            (book_id,),
+        )
+        conn.commit()
+        return True
 
     @staticmethod
     def change_pwd(
@@ -434,9 +527,41 @@ class AccountBook:
         return self._id == other._id
 
     @staticmethod
+    def verify_book_ownership(
+        conn: sqlite3.Connection,
+        token: str,
+        account_book_id: int,
+    ) -> bool:
+        """
+        Verify if the account book belongs to the account associated with the token.
+        Raises TokenNotFoundError or TokenExpireException if token is invalid/expired.
+        Returns True if ownership is verified, otherwise raises RuntimeError.
+        """
+        row = conn.execute(
+            "SELECT account_id, token_expire FROM accounts WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if row is None:
+            raise TokenNotFoundError("Token not found.")
+        account_id, token_expire = row
+        now = int(time.time())
+        if token_expire is not None and now > token_expire:
+            raise TokenExpireException("Token expired.")
+        book_row = conn.execute(
+            "SELECT 1 FROM account_books WHERE account_book_id = ? AND account_id = ?",
+            (account_book_id, account_id),
+        ).fetchone()
+        if book_row is None:
+            raise RuntimeError(
+                "Account book not found or does not belong to this account."
+            )
+        return True
+
+    @staticmethod
     def add_income(
         conn: sqlite3.Connection,
-        acc_bk_obj: AccountBook,
+        token: str,
+        account_book_id: int,
         amount: float,
         time: Optional[datetime],
         note: str = "",
@@ -445,11 +570,11 @@ class AccountBook:
         """
         Add an income transaction to the account book.
         """
-        if acc_bk_obj._id is None:
-            raise ValueError("AccountBook ID is not set. Cannot add income.")
+        # Verify ownership
+        AccountBook.verify_book_ownership(conn, token, account_book_id)
         tx = Transaction(
             amount=amount,
-            account_book_id=acc_bk_obj._id,
+            account_book_id=account_book_id,
             category=income_type,
             time=time,
             note=note,
@@ -459,7 +584,8 @@ class AccountBook:
     @staticmethod
     def add_outcome(
         conn: sqlite3.Connection,
-        acc_bk_obj: AccountBook,
+        token: str,
+        account_book_id: int,
         amount: float,
         time: Optional[datetime],
         note: str = "",
@@ -468,11 +594,11 @@ class AccountBook:
         """
         Add an expense transaction to the account book.
         """
-        if acc_bk_obj._id is None:
-            raise ValueError("AccountBook ID is not set. Cannot add outcome.")
+        AccountBook.verify_book_ownership(conn, token, account_book_id)
+
         tx = Transaction(
             amount=amount,
-            account_book_id=acc_bk_obj._id,
+            account_book_id=account_book_id,
             category=outcome_type,
             time=time,
             note=note,
@@ -505,25 +631,83 @@ class AccountBook:
         if tx_ids:
             Transaction.execute_db_remove(conn, tx_ids)
 
-    def execute_find_transaction(
-        self,
+    @staticmethod
+    def get_transaction_list(
         conn: sqlite3.Connection,
-        time: Optional[datetime] = None,
+        token: str,
+        account_book_id: int,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         note: Optional[str] = None,
-        account_name: Optional[str] = None,
-        account_book_name: Optional[str] = None,
     ) -> List[Transaction]:
         """
-        Find transactions in the current account book matching the optional filters.
+        Find transactions in the specified account book matching the optional filters,
+        sorted by time (earlier first). Token is verified and book ownership checked.
+        By default, shows all transactions.
         """
-        return Transaction.execute_db_query(
-            conn=conn,
-            account_book_id=self._id,
-            time=time,
-            note=note,
-            account_name=account_name,
-            account_book_name=account_book_name,
-        )
+        # Verify token and get account_id
+        row = conn.execute(
+            "SELECT account_id, token_expire FROM accounts WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if row is None:
+            raise TokenNotFoundError("Token not found.")
+        account_id, token_expire = row
+        now = int(time.time())
+        if token_expire is not None and now > token_expire:
+            raise TokenExpireException("Token expired.")
+
+        # Check if the account_book belongs to the account
+        book_row = conn.execute(
+            "SELECT 1 FROM account_books WHERE account_book_id = ? AND account_id = ?",
+            (account_book_id, account_id),
+        ).fetchone()
+        if book_row is None:
+            raise RuntimeError(
+                "Account book not found or does not belong to this account."
+            )
+
+        # Default time range: show all transactions
+        if start_time is None:
+            start_time = datetime.fromtimestamp(0)  # beginning of time
+        if end_time is None:
+            end_time = datetime.now()
+
+        sql = """
+            SELECT t.id, t.amount, t.time, t.note, t.category
+            FROM transactions AS t
+            WHERE t.account_book_id = ?
+              AND t.time >= ?
+              AND t.time <= ?
+        """
+        params: List = [account_book_id, start_time.isoformat(), end_time.isoformat()]
+        if note is not None:
+            sql += " AND t.note LIKE ?"
+            params.append(f"%{note}%")
+        sql += " ORDER BY t.time ASC"
+        rows = conn.execute(sql, params).fetchall()
+        result: List[Transaction] = []
+        for row in rows:
+            tx_id, amount, t_time, t_note, t_category = row
+            if t_category is None:
+                category_enum = None
+            else:
+                category_name: str = t_category
+                if amount >= 0:
+                    category_enum = IncomeType[category_name]
+                else:
+                    category_enum = OutcomeType[category_name]
+            result.append(
+                Transaction(
+                    amount=amount,
+                    account_book_id=account_book_id,
+                    time=datetime.fromisoformat(t_time),
+                    note=t_note,
+                    category=category_enum,
+                    id=tx_id,
+                )
+            )
+        return result
 
     def get_balance(self, conn: sqlite3.Connection) -> float:
         """
@@ -610,68 +794,69 @@ def delete_all():
     conn.close()
 
 
-if __name__ == "__main__":
-    # 0️⃣ 彻底重置数据库（调试用）
-    delete_all()
-
-    # 1️⃣ 初始化
-    conn, _ = init()
-
-    # 2️⃣ 注册 & 登录
-    alice = Account.register(
-        conn, name="alice", email="123321@gmail.com", pwd_hash="123456"
-    )
-    print("👤 注册成功:", alice)
-
-    login_acc = Account.login(conn, "alice", "123456")  # pyright: ignore[reportCallIssue]
-    print("🔐 登录成功:", login_acc)
-
-    # 3️⃣ 创建账本
-    book = Account.create_book(conn, account_id=login_acc.id, book_name="My First Book")  # pyright: ignore[reportOptionalMemberAccess]
-    print("📒 创建账本:", book.__dict__)
-
-    # 4️⃣ 记一笔收入 (+100) 与支出 (‑30)
-    AccountBook.add_income(
-        conn,
-        book,
-        amount=100.0,
-        time=datetime.now(),
-        note="Salary",
-        income_type=IncomeType.SALARY,
-    )
-    AccountBook.add_outcome(
-        conn,
-        book,
-        amount=-30.0,
-        time=datetime.now(),
-        note="Dinner",
-        outcome_type=OutcomeType.FOOD,
-    )
-    print("💰 已添加 2 条交易")
-
-    # 5️⃣ 查询交易 & 余额
-    tx_list = book.execute_find_transaction(conn)
-    print("🔍 当前账本交易:")
-    for tx in tx_list:
-        print("   ", tx.__dict__)
-
-    balance = book.get_balance(conn)
-    print("📊 当前余额:", balance)
-
-    # 6️⃣ 删除全部交易 → 再查余额
-    book.execute_remove_transaction(conn)
-    print("🗑️  已删除全部交易")
-    print("📊 删除后余额:", book.get_balance(conn))
-
-    # 7️⃣ 修改密码并验证
-    ok = Account.change_pwd(
-        conn=conn,
-        email_or_name="alice",  # pyright: ignore[reportArgumentType]
-        old_pwd_hash="123456",
-        new_pwd_hash="better_pwd",
-    )
-    print("🔑 修改密码成功?:", ok)
-    relog = Account.login(conn, "alice", "better_pwd")
-    print("🔐 新密码登录:", bool(relog))
-
-    conn.close()
+# if __name__ == "__main__":
+#     # 0️⃣ 彻底重置数据库（调试用）
+#     delete_all()
+#
+#     # 1️⃣ 初始化
+#     conn, _ = init()
+#
+#     # 2️⃣ 注册 & 登录
+#     alice = Account.register(
+#         conn, name="alice", email="123321@gmail.com", pwd_hash="123456"
+#     )
+#     print("👤 注册成功:", alice)
+#
+#     login_acc = Account.login(conn, "alice", "123456")  # pyright: ignore[reportCallIssue]
+#     print("🔐 登录成功:", login_acc)
+#
+#     # 3️⃣ 创建账本
+#     # FIXME: fix this
+#     book = Account.create_book(conn, account_id=login_acc.id, book_name="My First Book")  # pyright: ignore[reportOptionalMemberAccess]
+#     print("📒 创建账本:", book.__dict__)
+#
+#     # 4️⃣ 记一笔收入 (+100) 与支出 (‑30)
+#     AccountBook.add_income(
+#         conn,
+#         book,
+#         amount=100.0,
+#         time=datetime.now(),
+#         note="Salary",
+#         income_type=IncomeType.SALARY,
+#     )
+#     AccountBook.add_outcome(
+#         conn,
+#         book,
+#         amount=-30.0,
+#         time=datetime.now(),
+#         note="Dinner",
+#         outcome_type=OutcomeType.FOOD,
+#     )
+#     print("💰 已添加 2 条交易")
+#
+#     # 5️⃣ 查询交易 & 余额
+#     tx_list = book.execute_find_transaction(conn)
+#     print("🔍 当前账本交易:")
+#     for tx in tx_list:
+#         print("   ", tx.__dict__)
+#
+#     balance = book.get_balance(conn)
+#     print("📊 当前余额:", balance)
+#
+#     # 6️⃣ 删除全部交易 → 再查余额
+#     book.execute_remove_transaction(conn)
+#     print("🗑️  已删除全部交易")
+#     print("📊 删除后余额:", book.get_balance(conn))
+#
+#     # 7️⃣ 修改密码并验证
+#     ok = Account.change_pwd(
+#         conn=conn,
+#         email_or_name="alice",  # pyright: ignore[reportArgumentType]
+#         old_pwd_hash="123456",
+#         new_pwd_hash="better_pwd",
+#     )
+#     print("🔑 修改密码成功?:", ok)
+#     relog = Account.login(conn, "alice", "better_pwd")
+#     print("🔐 新密码登录:", bool(relog))
+#
+#     conn.close()
