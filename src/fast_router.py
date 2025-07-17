@@ -41,6 +41,7 @@ from db_api import IncomeType, OutcomeType
 from cus_exceptions import (
     DuplicatedAccountBookError,
     EmailFormatError,
+    PasswordWrongError,
     RequireInfoLostException,
     TokenExpireException,
     PwdNotMatchError,
@@ -189,7 +190,7 @@ async def get_profile(data: GetUserProfileRequest) -> GetUserProfileResponse:
 
 
 @router.put(
-    "/users/me/password",
+    "/users/me/change_password",
     response_model=ChangePasswordResponse,
     summary="change the user password",
 )
@@ -207,6 +208,9 @@ async def change_password(data: ChangePasswordRequest) -> ChangePasswordResponse
             new_pwd_hash=data.new_pwd_hash,
         )
         return ChangePasswordResponse(success=True, msg="Password changed successfully")
+    except PasswordWrongError as e:
+        logging.warning(f"Password wrong: {e}")
+        return ChangePasswordResponse(success=False, msg="Old password is incorrect")
     except RequireInfoLostException as e:
         logging.warning(f"Require info lost: {e}")
         return ChangePasswordResponse(success=False, msg=str(e))
@@ -242,13 +246,16 @@ async def create_acc_book(data: CreateAccountBookRequest) -> CreateAccountBookRe
         return CreateAccountBookResponse(
             success=False, code=2, msg="Token expired, please login again"
         )
+    except RequireInfoLostException as e:
+        logging.warning(f"Require info lost: {e}")
+        return CreateAccountBookResponse(code=4, success=False, msg=str(e))
     except Exception as e:
         logging.error(f"Error creating account book: {e}")
-        return CreateAccountBookResponse(success=False, code=4, msg=str(e))
+        return CreateAccountBookResponse(success=False, code=5, msg=str(e))
 
 
-@router.get(
-    "/books",
+@router.put(
+    "/list_books",
     response_model=ListBookResponse,
     summary="list the books in the account (need token)",
 )
@@ -311,8 +318,8 @@ async def remove_book(data: RemoveBookRequest) -> RemoveBookResponse:
         return RemoveBookResponse(success=False, code=3, msg=str(e))
 
 
-@router.get(
-    "/books",
+@router.post(
+    "/books_detail",
     response_model=BookDetailResponse,
     summary="get the book detail by book_id (need token)",
 )
@@ -380,12 +387,18 @@ async def get_book_detail(data: BookDetailRequest) -> BookDetailResponse:
 )
 async def add_income(data: AddIncomeRequest):
     try:
+        if len(data.time) > 0:
+            temp = data.time
+            print(temp)
+        else:
+            temp = datetime.now().isoformat()
+            print(temp)
         AccountBook.add_income(
             conn=conn,
             account_book_id=data.account_book_id,
             token=data.token,
             amount=data.amount,
-            time=str_to_datetime(data.time),
+            time=str_to_datetime(temp),
             note=data.note,
             income_type=IncomeType.index_2_income_type(data.income_idx),
         )
@@ -452,5 +465,8 @@ app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn
+    from db_api import delete_all
+
+    delete_all()
 
     uvicorn.run("fast_router:app", host="127.0.0.1", port=8000, reload=True)
