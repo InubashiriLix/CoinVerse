@@ -22,7 +22,7 @@ def str_to_datetime(datetime_str: str) -> datetime:
     Raises:
         ValueError: If the string is not in the correct format.
     """
-    return datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+    return datetime.strptime(datetime_str, "%Y-%m-%dT%H:%M:%S.%f")
 
 
 if __name__ == "__main__":
