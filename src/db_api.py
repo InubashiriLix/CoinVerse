@@ -16,6 +16,8 @@ from utils import verify_email_format
 from cus_exceptions import (
     DuplicatedAccountBookError,
     EmailFormatError,
+    PasswordWrongError,
+    RequireInfoLostException,
     TokenExpireException,
     PwdNotMatchError,
     TokenNotFoundError,
@@ -405,6 +407,8 @@ class Account:
     def create_book(
         conn: sqlite3.Connection, token: str, book_name: str
     ) -> AccountBook:
+        if book_name is None or book_name.strip() == "":
+            raise RequireInfoLostException("Book name is required.")
         cur = conn.execute(
             "SELECT account_id, token_expire FROM accounts WHERE token = ?",
             (token,),
@@ -490,7 +494,7 @@ class Account:
             (email_or_name, email_or_name),
         ).fetchone()
         if not row or row[1] != old_pwd_hash:
-            return False
+            raise PasswordWrongError
         account_id = row[0]
         conn.execute(
             "UPDATE accounts SET pwd = ? WHERE account_id = ?",
