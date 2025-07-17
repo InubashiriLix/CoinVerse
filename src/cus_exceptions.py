@@ -24,3 +24,7 @@ class EmailFormatError(Exception):
 
 class DuplicatedAccountBookError(Exception):
     pass
+
+
+class PasswordWrongError(Exception):
+    pass
