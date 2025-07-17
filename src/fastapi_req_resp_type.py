@@ -88,6 +88,7 @@ class CreateAccountBookResponse(BaseModel):
             # 1: token lost
             # 2: token expired
             # 3. book name duplicated
+            # 4. book name invalid
         msg: information about the operation
     """
 
