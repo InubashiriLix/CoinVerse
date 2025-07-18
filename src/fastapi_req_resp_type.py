@@ -187,7 +187,8 @@ class AddIncomeResponse(BaseModel):
             # 2 requireInfo lost (useless
             # 3 token lost
             # 4 token expired
-            # 5 unkown
+            # 5 income type index invalid
+            # 6 unkown
     """
 
     success: bool = Field(...)
@@ -214,7 +215,9 @@ class AddOutcomeResponse(BaseModel):
             # 1 invalid time str format
             # 2 token lost
             # 3 token expired
-            # 4 unkown
+            # 4 Invalid outcome value which is not negative
+            # 5 Invliad outcome value
+            # 6 Unkown Error
     """
 
     success: bool = Field(...)
