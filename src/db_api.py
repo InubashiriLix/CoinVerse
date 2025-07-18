@@ -16,6 +16,9 @@ from utils import verify_email_format
 from cus_exceptions import (
     DuplicatedAccountBookError,
     EmailFormatError,
+    IncomeValueError,
+    InvalidOutcomeIncomeValueError,
+    OutcomeValueError,
     PasswordWrongError,
     RequireInfoLostException,
     TokenExpireException,
@@ -104,16 +107,19 @@ class Transaction:
         self.id = id
         self.category = category
         # Validate that category is provided and matches the sign of amount
-        if self.amount >= 0:
-            if not isinstance(self.category, IncomeType):
-                raise ValueError(
-                    "Positive (or zero) amount transaction must have an IncomeType category."
+        try:
+            if isinstance(self.category, IncomeType) and self.amount < 0:
+                raise IncomeValueError(
+                    "the income should be an float or int and it should be positive"
                 )
-        elif self.amount < 0:
-            if not isinstance(self.category, OutcomeType):
-                raise ValueError(
-                    "Negative amount transaction must have an OutcomeType category."
+            elif isinstance(self.category, OutcomeType) and self.amount >= 0:
+                raise OutcomeValueError(
+                    "the outcome should be an float or int and it should be negative"
                 )
+        except ValueError as e:
+            raise InvalidOutcomeIncomeValueError(
+                "the outcome or income value should be a float or int, consider parsing bugs"
+            )
 
     @staticmethod
     def execute_db_add(conn: sqlite3.Connection, tx: Transaction) -> Optional[int]:
@@ -197,6 +203,9 @@ class Transaction:
             WHERE 1 = 1
         """
         params: List = []
+        if account_book_id is not None:
+            sql += " AND t.account_book_id = ?"
+            params.append(account_book_id)
         if transaction_id is not None:
             sql += " AND t.id = ?"
             params.append(transaction_id)
@@ -509,6 +518,7 @@ class Account:
             "SELECT account_book_id, name FROM account_books WHERE account_id = ?",
             (account_id,),
         ).fetchall()
+        print(rows)
         return [AccountBook(id=r[0], name=r[1], account_id=account_id) for r in rows]
 
 
