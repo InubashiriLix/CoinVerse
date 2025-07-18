@@ -26,6 +26,10 @@ class DuplicatedAccountBookError(Exception):
     pass
 
 
+class AccessDenialAccountBookError(Exception):
+    pass
+
+
 class PasswordWrongError(Exception):
     pass
 
@@ -57,4 +61,8 @@ class OutcomeTypeIndexError(Exception):
 class InvalidOutcomeIncomeValueError(Exception):
     """Raised when the outcome or income value is invalid."""
 
+    pass
+
+
+class LoginFailedError(Exception):
     pass

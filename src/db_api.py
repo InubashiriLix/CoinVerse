@@ -24,6 +24,7 @@ from cus_exceptions import (
     TokenExpireException,
     PwdNotMatchError,
     TokenNotFoundError,
+    AccessDenialAccountBookError,
 )
 
 DB_PATH = Path(__file__).parent / ".." / "db" / "account.db"
@@ -480,7 +481,7 @@ class Account:
             (book_id, account_id),
         ).fetchone()
         if book_row is None:
-            raise RuntimeError(
+            raise AccessDenialAccountBookError(
                 "Account book not found or does not belong to this account."
             )
         # Remove the account_book
@@ -676,7 +677,7 @@ class AccountBook:
             (account_book_id, account_id),
         ).fetchone()
         if book_row is None:
-            raise RuntimeError(
+            raise AccessDenialAccountBookError(
                 "Account book not found or does not belong to this account."
             )
 
