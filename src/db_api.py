@@ -518,7 +518,6 @@ class Account:
             "SELECT account_book_id, name FROM account_books WHERE account_id = ?",
             (account_id,),
         ).fetchall()
-        print(rows)
         return [AccountBook(id=r[0], name=r[1], account_id=account_id) for r in rows]
 
 

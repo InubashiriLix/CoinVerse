@@ -393,10 +393,8 @@ async def add_income(data: AddIncomeRequest):
     try:
         if len(data.time) > 1:
             temp = data.time
-            print(temp)
         else:
             temp = datetime.now().isoformat()
-            print(temp)
         AccountBook.add_income(
             conn=conn,
             account_book_id=data.account_book_id,
