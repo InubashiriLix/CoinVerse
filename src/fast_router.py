@@ -41,8 +41,12 @@ from db_api import IncomeType, OutcomeType
 from cus_exceptions import (
     DuplicatedAccountBookError,
     EmailFormatError,
+    IncomeValueError,
+    InvalidOutcomeIncomeValueError,
+    OutcomeValueError,
     PasswordWrongError,
     RequireInfoLostException,
+    TimeFormatError,
     TokenExpireException,
     PwdNotMatchError,
     TokenNotFoundError,
@@ -387,7 +391,7 @@ async def get_book_detail(data: BookDetailRequest) -> BookDetailResponse:
 )
 async def add_income(data: AddIncomeRequest):
     try:
-        if len(data.time) > 0:
+        if len(data.time) > 1:
             temp = data.time
             print(temp)
         else:
@@ -403,9 +407,9 @@ async def add_income(data: AddIncomeRequest):
             income_type=IncomeType.index_2_income_type(data.income_idx),
         )
         return AddIncomeResponse(success=True, msg="Income added successfully", code=0)
-    except ValueError as e:
-        logging.error(f"Invalid input time: {e}")
-        return AddIncomeResponse(success=False, code=1, msg="Invalid input time format")
+    except TimeFormatError as e:
+        logging.error(f"Time format error: {e}")
+        return AddIncomeResponse(success=False, code=1, msg=str(e))
     except RequireInfoLostException as e:
         logging.warning(f"Require info lost: {e}")
         return AddIncomeResponse(success=False, code=2, msg=str(e))
@@ -417,9 +421,12 @@ async def add_income(data: AddIncomeRequest):
         return AddIncomeResponse(
             success=False, code=4, msg="Token expired, please login again"
         )
+    except ValueError as e:
+        logging.error(f"Invalid input time: {e}")
+        return AddIncomeResponse(success=False, code=5, msg="Income Type Index Error")
     except Exception as e:
         logging.error(f"Error adding income: {e}")
-        return AddIncomeResponse(success=False, code=5, msg=str(e))
+        return AddIncomeResponse(success=False, code=6, msg=str(e))
 
 
 @router.post(
@@ -429,19 +436,23 @@ async def add_income(data: AddIncomeRequest):
 )
 async def add_outcome(data: AddOutcomeRequest) -> AddOutcomeResponse:
     try:
+        if len(data.time) > 1:
+            temp = data.time
+        else:
+            temp = datetime.now().isoformat()
         AccountBook.add_outcome(
             conn=conn,
             account_book_id=data.account_book_id,
             token=data.token,
             amount=data.amount,
-            time=str_to_datetime(data.time),
+            time=str_to_datetime(temp),
             note=data.note,
             outcome_type=OutcomeType.index_2_outcome_type(data.outcome_idx),
         )
         return AddOutcomeResponse(
             success=True, msg="Outcome added successfully", code=0
         )
-    except ValueError as e:
+    except TimeFormatError as e:
         logging.error(f"Invalid input time: {e}")
         return AddOutcomeResponse(
             success=False, code=1, msg="Invalid input time format"
@@ -454,9 +465,15 @@ async def add_outcome(data: AddOutcomeRequest) -> AddOutcomeResponse:
         return AddOutcomeResponse(
             success=False, code=3, msg="Token expired, please login again"
         )
-    except Exception as e:
-        logging.error(f"Error adding outcome: {e}")
+    except OutcomeValueError as e:
+        logging.error(f"Invalid Outcome Value: {e}")
         return AddOutcomeResponse(success=False, code=4, msg=str(e))
+    except InvalidOutcomeIncomeValueError as e:
+        logging.exception(f"Invlaid Outcome Value: {e}")
+        return AddOutcomeResponse(success=False, code=5, msg=str(e))
+    except Exception as e:
+        logging.exception(f"Error adding outcome: {e}")
+        return AddOutcomeResponse(success=False, code=6, msg=str(e))
 
 
 app = FastAPI(title="CoinVerse", version="0.1.0")
