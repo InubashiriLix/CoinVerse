@@ -355,10 +355,3 @@ async def global_exception_middleware(request: Request, call_next):
 
 
 # =======================================================================
-if __name__ == "__main__":
-    import uvicorn
-    from db_api import delete_all
-
-    delete_all()
-
-    uvicorn.run("fast_router:app", host="127.0.0.1", port=8000, reload=True)

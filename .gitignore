@@ -1,2 +1,3 @@
 src/__pycache__
 db
+fastapi_server/__pycache__
