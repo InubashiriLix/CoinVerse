@@ -5,4 +5,4 @@ if __name__ == "__main__":
 
     delete_all()
 
-    uvicorn.run("fast_router:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("fast_router:app", host="192.168.31.135", port=1919, reload=True)
