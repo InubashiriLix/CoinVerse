@@ -42,7 +42,8 @@ data class ListBookResponse (
     val msg: kotlin.String,
 
     @SerialName(value = "books")
-    val books: kotlin.collections.List<kotlin.collections.Map<kotlin.String, kotlin.collections.List<kotlin.Any>>>
+    val books: List<Map<Int, Pair<String, Float>>>
+//    val books: kotlin.collections.List<kotlin.collections.Map<kotlin.Int, kotlin.collections.List<kotlin.String, kotlin.Float>>>
 
 ) {
 

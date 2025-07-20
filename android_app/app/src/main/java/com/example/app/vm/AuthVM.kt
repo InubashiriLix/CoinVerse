@@ -13,7 +13,7 @@ import java.util.*
 class AuthVM : ViewModel() {
 
     val loading = mutableStateOf(false)
-    val error   = mutableStateOf<String?>(null)
+    val error = mutableStateOf<String?>(null)
 
     /**
      * 登录
@@ -24,13 +24,19 @@ class AuthVM : ViewModel() {
 
         viewModelScope.launch {
             loading.value = true
-            error.value   = null
+            error.value = null
 
             // 👉 后端期待 pwd_hash，这里简单做 SHA‑256；你可以换成你后端一致的算法
             val pwdHash = sha256(plainPwd)
 
             when (val r = ApiClient.call {
-                login(LoginReq(name_or_email = emailOrName, pwd_hash = pwdHash, maintain_online = true))
+                login(
+                    LoginReq(
+                        name_or_email = emailOrName,
+                        pwd_hash = pwdHash,
+                        maintain_online = true
+                    )
+                )
             }) {
                 is ApiResult.Ok -> {
                     val token = r.body.accessToken
@@ -63,11 +69,29 @@ class AuthVM : ViewModel() {
             when (val r = ApiClient.call {
                 register(RegisterReq(name = name, email = email, pwd_hash = pwdHash))
             }) {
-                is ApiResult.Ok      -> { loading.value = false; onSuccess() }
-                is ApiResult.BizError -> { loading.value = false; error.value = r.msg }
-                is ApiResult.NetError -> { loading.value = false; error.value = r.throwable.message }
+                is ApiResult.Ok -> {
+                    loading.value = false; onSuccess()
+                }
+
+                is ApiResult.BizError -> {
+                    loading.value = false; error.value = r.msg
+                }
+
+                is ApiResult.NetError -> {
+                    loading.value = false; error.value = r.throwable.message
+                }
             }
         }
+    }
+
+    fun loginWithServer(
+        serverUrl: String,
+        emailOrName: String,
+        plainPwd: String,
+        onSuccess: () -> Unit
+    ) = viewModelScope.launch {
+        ServerStore.save(serverUrl.trimEnd('/'))   // 持久化
+        login(emailOrName, plainPwd, onSuccess)    // 调用已有 login()
     }
 
     /** 最粗暴的 SHA‑256 -> hex */
@@ -76,3 +100,5 @@ class AuthVM : ViewModel() {
             .digest(src.toByteArray())
             .joinToString("") { "%02x".format(it) }
 }
+
+

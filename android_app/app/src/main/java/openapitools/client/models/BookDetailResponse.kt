@@ -29,7 +29,6 @@ import kotlinx.serialization.Contextual
  * @param transactions 
  */
 @Serializable
-
 data class BookDetailResponse (
 
     @SerialName(value = "success")
@@ -42,7 +41,8 @@ data class BookDetailResponse (
     val code: kotlin.Int,
 
     @SerialName(value = "transactions")
-    val transactions: kotlin.collections.List<kotlin.collections.Map<kotlin.String, kotlin.collections.List<kotlin.Any>>>
+    val transactions: List<Map<Int, Triple<String, String?, Float>>>
+//    val transactions: kotlin.collections.List<kotlin.collections.Map<kotlin.String, kotlin.collections.List<kotlin.Any>>>
 
 ) {
 

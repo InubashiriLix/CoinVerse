@@ -1,15 +1,16 @@
 
 plugins {
+    // Kotlin 2.2.0
+//    id("org.jetbrains.kotlin.android") version "2.2.0"
+//    id("org.jetbrains.kotlin.plugin.compose") version "2.2.0"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.2.0"
+
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 kotlin {
-    compilerOptions {
-        // ↓ ↓ ↓ 仅这一行即可把 K2 关闭，IDE 的 “deprecated” 警告也没了
-        languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9)
-    }
     sourceSets.all {
         languageSettings.optIn("androidx.compose.material3.ExperimentalMaterial3Api")
     }
