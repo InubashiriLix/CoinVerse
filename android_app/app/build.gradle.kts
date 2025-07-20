@@ -14,8 +14,8 @@ kotlin {
         languageSettings.optIn("androidx.compose.material3.ExperimentalMaterial3Api")
     }
 }
-android {
 
+android {
     namespace = "com.example.app"
     compileSdk = 36
     defaultConfig {
@@ -24,7 +24,6 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -50,7 +49,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":mobile-client"))
     implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.2.0"))
     // ① Retrofit & OkHttp
     implementation(platform("com.squareup.retrofit2:retrofit-bom:2.11.0"))
