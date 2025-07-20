@@ -10,6 +10,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
@@ -55,4 +56,12 @@ fun AppTheme(
         typography = Typography,
         content = content
     )
+}
+
+private val LightColors = lightColorScheme(primary = Color(0xFF00C8B1))
+private val DarkColors  = darkColorScheme(primary = Color(0xFF00C8B1))
+
+@Composable fun CVTheme(content:@Composable ()->Unit){
+    val dark = isSystemInDarkTheme()
+    MaterialTheme(colorScheme = if(dark) DarkColors else LightColors, typography = Typography, content = content)
 }

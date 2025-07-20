@@ -10,6 +10,9 @@ kotlin {
         // ↓ ↓ ↓ 仅这一行即可把 K2 关闭，IDE 的 “deprecated” 警告也没了
         languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9)
     }
+    sourceSets.all {
+        languageSettings.optIn("androidx.compose.material3.ExperimentalMaterial3Api")
+    }
 }
 android {
 
@@ -60,6 +63,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    implementation("androidx.compose.material3:material3:1.2.1")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended:<composeVersion>")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -69,6 +79,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.navigation.compose.android)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
