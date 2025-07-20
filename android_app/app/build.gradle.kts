@@ -47,6 +47,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":mobile-client"))
     implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.2.0"))
     // ① Retrofit & OkHttp
     implementation(platform("com.squareup.retrofit2:retrofit-bom:2.11.0"))
@@ -58,6 +59,7 @@ dependencies {
     // ② Kotlinx Serialization / 协程（保持 1.9.0 / 1.10.2）
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
